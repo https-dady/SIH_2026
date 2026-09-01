@@ -1,270 +1,406 @@
-const asyncHandler = require("../utils/asyncHandler");
-
-const {
-    getLandslidePrediction
-} = require("../services/mlService");
-
-const {
-    getLocationData
-} = require("../services/dataAggregatorService");
-
-const {
-    prepareMLFeatures
-} = require("../services/featurePreparationService");
-
-const PredictionRecord =
-    require("../models/PredictionRecord");
+const asyncHandler = require("../utils/asyncHandler"); 
 
 
-const predictRisk = asyncHandler(
-    async (req, res) => {
+const { 
+    getLandslidePrediction 
+} = require("../services/mlService"); 
 
-        // Existing manual ML prediction
-        const result =
-            await getLandslidePrediction(
-                req.body
-            );
 
-        // Prediction result MongoDB mein save karo
-        const predictionRecord =
-            await PredictionRecord.create({
+const { 
+    getLocationData 
+} = require("../services/dataAggregatorService"); 
 
-                inputs:
-                    req.body,
 
-                prediction:
-                    result.data.prediction,
+const { 
+    prepareMLFeatures 
+} = require("../services/featurePreparationService"); 
 
-                probabilities:
-                    result.data.probabilities,
 
-                source:
-                    "manual"
-            });
+const { 
+    interpretRisk 
+} = require("../services/riskInterpretationService"); 
 
-        res.status(200).json({
 
-            success: true,
+const { 
+    generateRiskInsights 
+} = require(
+    "../services/riskInsightsService"
+); 
 
-            data:
-                result.data,
 
-            recordId:
-                predictionRecord._id
-        });
-    }
-);
+const PredictionRecord = 
+    require("../models/PredictionRecord"); 
 
 
 /*
-    New:
-    Location-based automatic prediction
+    Manual ML prediction
 */
 
-const predictRiskByLocation =
-    asyncHandler(
-        async (req, res) => {
-
-            const {
-                latitude,
-                longitude
-            } = req.body;
-
-
-            // Validate latitude
-            if (
-                typeof latitude !== "number"
-            ) {
-
-                const error =
-                    new Error(
-                        "Valid latitude is required"
-                    );
-
-                error.statusCode = 400;
-
-                throw error;
-            }
-
-
-            // Validate longitude
-            if (
-                typeof longitude !== "number"
-            ) {
-
-                const error =
-                    new Error(
-                        "Valid longitude is required"
-                    );
-
-                error.statusCode = 400;
-
-                throw error;
-            }
-
+const predictRisk = 
+    asyncHandler( 
+        async (req, res) => { 
 
             /*
-                STEP 1:
-                Get raw data from
-                all providers
+                Get prediction
+                from ML service
             */
 
-            const rawData =
-                await getLocationData(
-                    latitude,
-                    longitude
-                );
+            const result = 
+                await getLandslidePrediction( 
+                    req.body 
+                ); 
 
 
             /*
-                STEP 2:
-                Convert raw data into
-                ML-compatible features
+                Interpret
+                ML prediction
             */
 
-            const mlFeatures =
-                prepareMLFeatures(
-                    rawData
-                );
+            const riskInterpretation = 
+                interpretRisk( 
+                    result.data 
+                ); 
 
 
             /*
-                STEP 3:
-                Send features to
-                ML service
+                Generate
+                risk insights
+
+                Manual prediction already
+                contains ML-compatible features,
+                so req.body is used for both
+                rawData and mlFeatures.
             */
 
-            const result =
-                await getLandslidePrediction(
-                    mlFeatures
-                );
+            const riskInsights = 
+                generateRiskInsights( 
+                    req.body,
+                    req.body,
+                    riskInterpretation 
+                ); 
 
 
             /*
-                STEP 4:
                 Save prediction
                 in MongoDB
             */
 
-            const predictionRecord =
-                await PredictionRecord.create({
+            const predictionRecord = 
+                await PredictionRecord.create({ 
 
-                    location: {
+                    inputs: 
+                        req.body, 
 
-                        latitude,
+                    prediction: 
+                        result.data.prediction, 
 
-                        longitude
-                    },
+                    probabilities: 
+                        result.data.probabilities, 
 
-                    inputs:
-                        mlFeatures,
+                    source: 
+                        "manual" 
+                }); 
 
-                    prediction:
-                        result.data.prediction,
 
-                    probabilities:
-                        result.data.probabilities,
+            /*
+                Send response
+            */
 
-                    source:
-                        "location"
-                });
+            res.status(200).json({ 
+
+                success: 
+                    true, 
+
+                data: 
+                    result.data, 
+
+                riskInterpretation, 
+
+                riskInsights, 
+
+                recordId: 
+                    predictionRecord._id 
+            }); 
+        } 
+    ); 
+
+
+/*
+    Location-based
+    automatic prediction
+*/
+
+const predictRiskByLocation = 
+    asyncHandler( 
+        async (req, res) => { 
+
+            const { 
+                latitude, 
+                longitude 
+            } = req.body; 
+
+
+            /*
+                Validate latitude
+            */
+
+            if ( 
+                typeof latitude !== "number" || 
+                !Number.isFinite(latitude) || 
+                latitude < -90 || 
+                latitude > 90 
+            ) { 
+
+                const error = 
+                    new Error( 
+                        "Valid latitude is required" 
+                    ); 
+
+                error.statusCode = 
+                    400; 
+
+                throw error; 
+            } 
+
+
+            /*
+                Validate longitude
+            */
+
+            if ( 
+                typeof longitude !== "number" || 
+                !Number.isFinite(longitude) || 
+                longitude < -180 || 
+                longitude > 180 
+            ) { 
+
+                const error = 
+                    new Error( 
+                        "Valid longitude is required" 
+                    ); 
+
+                error.statusCode = 
+                    400; 
+
+                throw error; 
+            } 
+
+
+            /*
+                STEP 1:
+
+                Get raw data from
+                all providers
+            */
+
+            const rawData = 
+                await getLocationData( 
+                    latitude, 
+                    longitude 
+                ); 
+
+
+            /*
+                STEP 2:
+
+                Convert raw data into
+                ML-compatible features
+            */
+
+            const mlFeatures = 
+                prepareMLFeatures( 
+                    rawData 
+                ); 
+
+
+            /*
+                STEP 3:
+
+                Send features
+                to ML service
+            */
+
+            const result = 
+                await getLandslidePrediction( 
+                    mlFeatures 
+                ); 
+
+
+            /*
+                STEP 4:
+
+                Interpret
+                ML result
+            */
+
+            const riskInterpretation = 
+                interpretRisk( 
+                    result.data 
+                ); 
 
 
             /*
                 STEP 5:
+
+                Generate
+                risk insights
+            */
+
+            const riskInsights = 
+                generateRiskInsights( 
+                    rawData,
+                    mlFeatures,
+                    riskInterpretation 
+                ); 
+
+
+            /*
+                STEP 6:
+
+                Save prediction
+                in MongoDB
+            */
+
+            const predictionRecord = 
+                await PredictionRecord.create({ 
+
+                    location: { 
+
+                        latitude, 
+
+                        longitude 
+                    }, 
+
+                    inputs: 
+                        mlFeatures, 
+
+                    prediction: 
+                        result.data.prediction, 
+
+                    probabilities: 
+                        result.data.probabilities, 
+
+                    source: 
+                        "location" 
+                }); 
+
+
+            /*
+                STEP 7:
+
                 Send final response
             */
 
-            res.status(200).json({
+            res.status(200).json({ 
 
-                success: true,
+                success: 
+                    true, 
 
-                location: {
+                location: { 
 
-                    latitude,
+                    latitude, 
 
-                    longitude
-                },
+                    longitude 
+                }, 
 
-                rawData,
+                rawData, 
 
-                mlFeatures,
+                mlFeatures, 
 
-                prediction:
-                    result.data,
+                prediction: 
+                    result.data, 
 
-                recordId:
-                    predictionRecord._id
-            });
-        }
-    );
+                riskInterpretation, 
 
+                riskInsights, 
 
-const getPredictionHistory =
-    asyncHandler(
-        async (req, res) => {
-
-            const predictions =
-                await PredictionRecord
-                    .find()
-                    .sort({
-                        createdAt: -1
-                    });
-
-            res.status(200).json({
-
-                success: true,
-
-                count:
-                    predictions.length,
-
-                data:
-                    predictions
-            });
-        }
-    );
+                recordId: 
+                    predictionRecord._id 
+            }); 
+        } 
+    ); 
 
 
-const getPredictionById =
-    asyncHandler(
-        async (req, res) => {
+/*
+    Get prediction history
+*/
 
-            const prediction =
-                await PredictionRecord.findById(
-                    req.params.id
-                );
+const getPredictionHistory = 
+    asyncHandler( 
+        async (req, res) => { 
 
-            if (!prediction) {
-
-                const error =
-                    new Error(
-                        "Prediction record not found"
-                    );
-
-                error.statusCode =
-                    404;
-
-                throw error;
-            }
-
-            res.status(200).json({
-
-                success: true,
-
-                data:
-                    prediction
-            });
-        }
-    );
+            const predictions = 
+                await PredictionRecord 
+                    .find() 
+                    .sort({ 
+                        createdAt: -1 
+                    }); 
 
 
-module.exports = {
+            res.status(200).json({ 
 
-    predictRisk,
+                success: 
+                    true, 
 
-    predictRiskByLocation,
+                count: 
+                    predictions.length, 
 
-    getPredictionHistory,
+                data: 
+                    predictions 
+            }); 
+        } 
+    ); 
 
-    getPredictionById
+
+/*
+    Get prediction by ID
+*/
+
+const getPredictionById = 
+    asyncHandler( 
+        async (req, res) => { 
+
+            const prediction = 
+                await PredictionRecord.findById( 
+                    req.params.id 
+                ); 
+
+
+            if ( 
+                !prediction 
+            ) { 
+
+                const error = 
+                    new Error( 
+                        "Prediction record not found" 
+                    ); 
+
+                error.statusCode = 
+                    404; 
+
+                throw error; 
+            } 
+
+
+            res.status(200).json({ 
+
+                success: 
+                    true, 
+
+                data: 
+                    prediction 
+            }); 
+        } 
+    ); 
+
+
+module.exports = { 
+
+    predictRisk, 
+
+    predictRiskByLocation, 
+
+    getPredictionHistory, 
+
+    getPredictionById 
 };
