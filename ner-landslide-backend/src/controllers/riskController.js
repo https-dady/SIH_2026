@@ -28,6 +28,13 @@ const {
 );
 
 
+const {
+    getMapRiskData
+} = require(
+    "../services/mapDataService"
+);
+
+
 const PredictionRecord =
     require("../models/PredictionRecord");
 
@@ -261,6 +268,27 @@ const predictRiskByLocation =
             /*
                 STEP 6:
 
+                Prepare
+                map-compatible
+                risk data
+            */
+
+            const mapData =
+                getMapRiskData(
+                    latitude,
+                    longitude,
+                    {
+                        prediction:
+                            result.data.prediction,
+
+                        riskInterpretation
+                    }
+                );
+
+
+            /*
+                STEP 7:
+
                 Save complete prediction
                 in MongoDB
             */
@@ -294,7 +322,7 @@ const predictRiskByLocation =
 
 
             /*
-                STEP 7:
+                STEP 8:
 
                 Send final response
             */
@@ -321,6 +349,8 @@ const predictRiskByLocation =
                 riskInterpretation,
 
                 riskInsights,
+
+                mapData,
 
                 recordId:
                     predictionRecord._id
