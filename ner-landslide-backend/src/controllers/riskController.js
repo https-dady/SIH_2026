@@ -1,54 +1,54 @@
-const asyncHandler = require("../utils/asyncHandler"); 
+const asyncHandler = require("../utils/asyncHandler");
 
 
-const { 
-    getLandslidePrediction 
-} = require("../services/mlService"); 
+const {
+    getLandslidePrediction
+} = require("../services/mlService");
 
 
-const { 
-    getLocationData 
-} = require("../services/dataAggregatorService"); 
+const {
+    getLocationData
+} = require("../services/dataAggregatorService");
 
 
-const { 
-    prepareMLFeatures 
-} = require("../services/featurePreparationService"); 
+const {
+    prepareMLFeatures
+} = require("../services/featurePreparationService");
 
 
-const { 
-    interpretRisk 
-} = require("../services/riskInterpretationService"); 
+const {
+    interpretRisk
+} = require("../services/riskInterpretationService");
 
 
-const { 
-    generateRiskInsights 
+const {
+    generateRiskInsights
 } = require(
     "../services/riskInsightsService"
-); 
+);
 
 
-const PredictionRecord = 
-    require("../models/PredictionRecord"); 
+const PredictionRecord =
+    require("../models/PredictionRecord");
 
 
 /*
     Manual ML prediction
 */
 
-const predictRisk = 
-    asyncHandler( 
-        async (req, res) => { 
+const predictRisk =
+    asyncHandler(
+        async (req, res) => {
 
             /*
                 Get prediction
                 from ML service
             */
 
-            const result = 
-                await getLandslidePrediction( 
-                    req.body 
-                ); 
+            const result =
+                await getLandslidePrediction(
+                    req.body
+                );
 
 
             /*
@@ -56,10 +56,10 @@ const predictRisk =
                 ML prediction
             */
 
-            const riskInterpretation = 
-                interpretRisk( 
-                    result.data 
-                ); 
+            const riskInterpretation =
+                interpretRisk(
+                    result.data
+                );
 
 
             /*
@@ -72,57 +72,61 @@ const predictRisk =
                 rawData and mlFeatures.
             */
 
-            const riskInsights = 
-                generateRiskInsights( 
+            const riskInsights =
+                generateRiskInsights(
                     req.body,
                     req.body,
-                    riskInterpretation 
-                ); 
+                    riskInterpretation
+                );
 
 
             /*
-                Save prediction
+                Save complete prediction
                 in MongoDB
             */
 
-            const predictionRecord = 
-                await PredictionRecord.create({ 
+            const predictionRecord =
+                await PredictionRecord.create({
 
-                    inputs: 
-                        req.body, 
+                    inputs:
+                        req.body,
 
-                    prediction: 
-                        result.data.prediction, 
+                    prediction:
+                        result.data.prediction,
 
-                    probabilities: 
-                        result.data.probabilities, 
+                    probabilities:
+                        result.data.probabilities,
 
-                    source: 
-                        "manual" 
-                }); 
+                    riskInterpretation,
+
+                    riskInsights,
+
+                    source:
+                        "manual"
+                });
 
 
             /*
                 Send response
             */
 
-            res.status(200).json({ 
+            res.status(200).json({
 
-                success: 
-                    true, 
+                success:
+                    true,
 
-                data: 
-                    result.data, 
+                data:
+                    result.data,
 
-                riskInterpretation, 
+                riskInterpretation,
 
-                riskInsights, 
+                riskInsights,
 
-                recordId: 
-                    predictionRecord._id 
-            }); 
-        } 
-    ); 
+                recordId:
+                    predictionRecord._id
+            });
+        }
+    );
 
 
 /*
@@ -130,60 +134,60 @@ const predictRisk =
     automatic prediction
 */
 
-const predictRiskByLocation = 
-    asyncHandler( 
-        async (req, res) => { 
+const predictRiskByLocation =
+    asyncHandler(
+        async (req, res) => {
 
-            const { 
-                latitude, 
-                longitude 
-            } = req.body; 
+            const {
+                latitude,
+                longitude
+            } = req.body;
 
 
             /*
                 Validate latitude
             */
 
-            if ( 
-                typeof latitude !== "number" || 
-                !Number.isFinite(latitude) || 
-                latitude < -90 || 
-                latitude > 90 
-            ) { 
+            if (
+                typeof latitude !== "number" ||
+                !Number.isFinite(latitude) ||
+                latitude < -90 ||
+                latitude > 90
+            ) {
 
-                const error = 
-                    new Error( 
-                        "Valid latitude is required" 
-                    ); 
+                const error =
+                    new Error(
+                        "Valid latitude is required"
+                    );
 
-                error.statusCode = 
-                    400; 
+                error.statusCode =
+                    400;
 
-                throw error; 
-            } 
+                throw error;
+            }
 
 
             /*
                 Validate longitude
             */
 
-            if ( 
-                typeof longitude !== "number" || 
-                !Number.isFinite(longitude) || 
-                longitude < -180 || 
-                longitude > 180 
-            ) { 
+            if (
+                typeof longitude !== "number" ||
+                !Number.isFinite(longitude) ||
+                longitude < -180 ||
+                longitude > 180
+            ) {
 
-                const error = 
-                    new Error( 
-                        "Valid longitude is required" 
-                    ); 
+                const error =
+                    new Error(
+                        "Valid longitude is required"
+                    );
 
-                error.statusCode = 
-                    400; 
+                error.statusCode =
+                    400;
 
-                throw error; 
-            } 
+                throw error;
+            }
 
 
             /*
@@ -193,11 +197,11 @@ const predictRiskByLocation =
                 all providers
             */
 
-            const rawData = 
-                await getLocationData( 
-                    latitude, 
-                    longitude 
-                ); 
+            const rawData =
+                await getLocationData(
+                    latitude,
+                    longitude
+                );
 
 
             /*
@@ -207,10 +211,10 @@ const predictRiskByLocation =
                 ML-compatible features
             */
 
-            const mlFeatures = 
-                prepareMLFeatures( 
-                    rawData 
-                ); 
+            const mlFeatures =
+                prepareMLFeatures(
+                    rawData
+                );
 
 
             /*
@@ -220,10 +224,10 @@ const predictRiskByLocation =
                 to ML service
             */
 
-            const result = 
-                await getLandslidePrediction( 
-                    mlFeatures 
-                ); 
+            const result =
+                await getLandslidePrediction(
+                    mlFeatures
+                );
 
 
             /*
@@ -233,10 +237,10 @@ const predictRiskByLocation =
                 ML result
             */
 
-            const riskInterpretation = 
-                interpretRisk( 
-                    result.data 
-                ); 
+            const riskInterpretation =
+                interpretRisk(
+                    result.data
+                );
 
 
             /*
@@ -246,43 +250,47 @@ const predictRiskByLocation =
                 risk insights
             */
 
-            const riskInsights = 
-                generateRiskInsights( 
+            const riskInsights =
+                generateRiskInsights(
                     rawData,
                     mlFeatures,
-                    riskInterpretation 
-                ); 
+                    riskInterpretation
+                );
 
 
             /*
                 STEP 6:
 
-                Save prediction
+                Save complete prediction
                 in MongoDB
             */
 
-            const predictionRecord = 
-                await PredictionRecord.create({ 
+            const predictionRecord =
+                await PredictionRecord.create({
 
-                    location: { 
+                    location: {
 
-                        latitude, 
+                        latitude,
 
-                        longitude 
-                    }, 
+                        longitude
+                    },
 
-                    inputs: 
-                        mlFeatures, 
+                    inputs:
+                        mlFeatures,
 
-                    prediction: 
-                        result.data.prediction, 
+                    prediction:
+                        result.data.prediction,
 
-                    probabilities: 
-                        result.data.probabilities, 
+                    probabilities:
+                        result.data.probabilities,
 
-                    source: 
-                        "location" 
-                }); 
+                    riskInterpretation,
+
+                    riskInsights,
+
+                    source:
+                        "location"
+                });
 
 
             /*
@@ -291,116 +299,116 @@ const predictRiskByLocation =
                 Send final response
             */
 
-            res.status(200).json({ 
+            res.status(200).json({
 
-                success: 
-                    true, 
+                success:
+                    true,
 
-                location: { 
+                location: {
 
-                    latitude, 
+                    latitude,
 
-                    longitude 
-                }, 
+                    longitude
+                },
 
-                rawData, 
+                rawData,
 
-                mlFeatures, 
+                mlFeatures,
 
-                prediction: 
-                    result.data, 
+                prediction:
+                    result.data,
 
-                riskInterpretation, 
+                riskInterpretation,
 
-                riskInsights, 
+                riskInsights,
 
-                recordId: 
-                    predictionRecord._id 
-            }); 
-        } 
-    ); 
+                recordId:
+                    predictionRecord._id
+            });
+        }
+    );
 
 
 /*
     Get prediction history
 */
 
-const getPredictionHistory = 
-    asyncHandler( 
-        async (req, res) => { 
+const getPredictionHistory =
+    asyncHandler(
+        async (req, res) => {
 
-            const predictions = 
-                await PredictionRecord 
-                    .find() 
-                    .sort({ 
-                        createdAt: -1 
-                    }); 
+            const predictions =
+                await PredictionRecord
+                    .find()
+                    .sort({
+                        createdAt: -1
+                    });
 
 
-            res.status(200).json({ 
+            res.status(200).json({
 
-                success: 
-                    true, 
+                success:
+                    true,
 
-                count: 
-                    predictions.length, 
+                count:
+                    predictions.length,
 
-                data: 
-                    predictions 
-            }); 
-        } 
-    ); 
+                data:
+                    predictions
+            });
+        }
+    );
 
 
 /*
     Get prediction by ID
 */
 
-const getPredictionById = 
-    asyncHandler( 
-        async (req, res) => { 
+const getPredictionById =
+    asyncHandler(
+        async (req, res) => {
 
-            const prediction = 
-                await PredictionRecord.findById( 
-                    req.params.id 
-                ); 
-
-
-            if ( 
-                !prediction 
-            ) { 
-
-                const error = 
-                    new Error( 
-                        "Prediction record not found" 
-                    ); 
-
-                error.statusCode = 
-                    404; 
-
-                throw error; 
-            } 
+            const prediction =
+                await PredictionRecord.findById(
+                    req.params.id
+                );
 
 
-            res.status(200).json({ 
+            if (
+                !prediction
+            ) {
 
-                success: 
-                    true, 
+                const error =
+                    new Error(
+                        "Prediction record not found"
+                    );
 
-                data: 
-                    prediction 
-            }); 
-        } 
-    ); 
+                error.statusCode =
+                    404;
+
+                throw error;
+            }
 
 
-module.exports = { 
+            res.status(200).json({
 
-    predictRisk, 
+                success:
+                    true,
 
-    predictRiskByLocation, 
+                data:
+                    prediction
+            });
+        }
+    );
 
-    getPredictionHistory, 
 
-    getPredictionById 
+module.exports = {
+
+    predictRisk,
+
+    predictRiskByLocation,
+
+    getPredictionHistory,
+
+    getPredictionById
 };
