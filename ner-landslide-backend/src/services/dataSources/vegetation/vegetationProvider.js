@@ -5,58 +5,255 @@ const BaseProvider = require("../baseProvider");
 
 class VegetationProvider extends BaseProvider {
 
+
+    /*
+        Cache Copernicus access token
+        so every prediction request
+        does not request a new token.
+    */
+
+    static accessToken = null;
+
+    static tokenExpiresAt = 0;
+
+    static tokenRequestPromise = null;
+
+
+    /*
+    Cache NDVI results.
+
+    Satellite vegetation data does not
+    change frequently, so short-term
+    caching avoids repeated expensive
+    Copernicus API requests.
+*/
+
+    static ndviCache =
+        new Map();
+
+
+    static NDVI_CACHE_DURATION =
+        10 * 60 * 1000;
+
     async getAccessToken() {
-        const response = await axios.post(
-            "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token",
 
-            new URLSearchParams({
-                grant_type:
-                    "client_credentials",
+        if (
 
-                client_id:
-                    process.env.COPERNICUS_CLIENT_ID,
+            VegetationProvider.accessToken &&
 
-                client_secret:
-                    process.env.COPERNICUS_CLIENT_SECRET
-            }),
+            Date.now() <
+            VegetationProvider.tokenExpiresAt
 
-            {
-                headers: {
-                    "Content-Type":
-                        "application/x-www-form-urlencoded"
-                }
-            }
-        );
+        ) {
 
-        const accessToken =
-            response.data.access_token;
-
-        if (!accessToken) {
-            throw new Error(
-                "Failed to receive Copernicus access token"
+            return (
+                VegetationProvider.accessToken
             );
         }
 
-        return accessToken;
+
+        /*
+            If another request is already
+            fetching a token, wait for
+            the same request instead of
+            creating another token request.
+        */
+
+        if (
+
+            VegetationProvider.tokenRequestPromise
+
+        ) {
+
+            return (
+                await VegetationProvider
+                    .tokenRequestPromise
+            );
+        }
+
+
+        VegetationProvider.tokenRequestPromise =
+
+            axios.post(
+
+                "https://identity.dataspace.copernicus.eu/auth/realms/CDSE/protocol/openid-connect/token",
+
+                new URLSearchParams({
+
+                    grant_type:
+                        "client_credentials",
+
+                    client_id:
+                        process.env.COPERNICUS_CLIENT_ID,
+
+                    client_secret:
+                        process.env.COPERNICUS_CLIENT_SECRET
+
+                }),
+
+                {
+
+                    headers: {
+
+                        "Content-Type":
+                            "application/x-www-form-urlencoded"
+
+                    },
+
+                    timeout:
+                        15000
+
+                }
+
+            )
+
+                .then(
+
+                    (
+                        response
+                    ) => {
+
+                        const accessToken =
+                            response.data.access_token;
+
+
+                        const expiresIn =
+                            response.data.expires_in;
+
+
+                        if (
+
+                            !accessToken
+
+                        ) {
+
+                            throw new Error(
+
+                                "Failed to receive Copernicus access token"
+
+                            );
+                        }
+
+
+                        const expiryMilliseconds =
+
+                            (
+
+                                typeof expiresIn ===
+                                    "number"
+
+                                    ? expiresIn
+
+                                    : 600
+
+                            )
+
+                            * 1000;
+
+
+                        VegetationProvider.accessToken =
+                            accessToken;
+
+
+                        VegetationProvider.tokenExpiresAt =
+
+                            Date.now() +
+
+                            expiryMilliseconds -
+
+                            60000;
+
+
+                        return accessToken;
+
+                    }
+
+                )
+
+                .finally(
+
+                    () => {
+
+                        VegetationProvider.tokenRequestPromise =
+                            null;
+
+                    }
+
+                );
+
+
+        return (
+
+            await VegetationProvider
+                .tokenRequestPromise
+
+        );
+
+        
+    }
+
+  /*
+        Generate cache key based on
+        nearby geographic grid.
+
+        Nearby coordinates inside the
+        same grid share the same NDVI
+        cache entry.
+    */
+
+    getCacheKey(
+        latitude,
+        longitude
+    ) {
+
+        const gridSize =
+            0.01;
+
+
+        const roundedLatitude =
+            Math.round(
+                latitude / gridSize
+            ) * gridSize;
+
+
+        const roundedLongitude =
+            Math.round(
+                longitude / gridSize
+            ) * gridSize;
+
+
+        return (
+            `${roundedLatitude.toFixed(2)},` +
+            `${roundedLongitude.toFixed(2)}`
+        );
     }
 
 
+
+    /*
+        Get recent satellite date range.
+
+        Reduced from 30 days to 14 days
+        for faster statistics processing.
+    */
+
     getDateRange() {
+
         const endDate =
             new Date();
+
 
         const startDate =
             new Date();
 
-        /*
-            Last 30 days satellite data.
-        */
 
         startDate.setDate(
-            startDate.getDate() - 30
+            startDate.getDate() - 14
         );
 
+
         return {
+
             from:
                 startDate.toISOString(),
 
@@ -66,85 +263,69 @@ class VegetationProvider extends BaseProvider {
     }
 
 
-    async getData(
+    /*
+        Fetch NDVI statistics.
+
+        strictCloudFiltering:
+        true  -> exclude cloud classes
+        false -> use available valid pixels
+                 as fallback.
+    */
+
+    async fetchNdviStatistics(
+
+        accessToken,
+
         latitude,
-        longitude
+
+        longitude,
+
+        dateRange,
+
+        strictCloudFiltering = true
+
     ) {
-        try {
-
-            const accessToken =
-                await this.getAccessToken();
-
-            const dateRange =
-                this.getDateRange();
 
 
-            /*
-                Small area around location.
+        /*
+            Small area around location.
 
-                Area-based average NDVI is more
-                stable than a single pixel.
-            */
+            Area-based NDVI is more
+            stable than a single pixel.
+        */
 
-            const offset = 0.002;
+        const offset =
+            0.002;
 
-            const bbox = [
+
+        const bbox =
+            [
+
                 longitude - offset,
+
                 latitude - offset,
 
                 longitude + offset,
+
                 latitude + offset
             ];
 
 
-            const evalscript = `
-                //VERSION=3
+        /*
+            Strict filtering removes
+            cloud-related SCL classes.
 
-                function setup() {
-                    return {
+            Fallback mode accepts all
+            valid land pixels so the
+            API does not unnecessarily
+            fail when no completely
+            cloud-free scene exists.
+        */
 
-                        input: [
-                            {
-                                bands: [
-                                    "B04",
-                                    "B08",
-                                    "SCL",
-                                    "dataMask"
-                                ]
-                            }
-                        ],
+        const invalidSclCheck =
+            strictCloudFiltering
 
-                        output: [
-                            {
-                                id: "ndvi",
-                                bands: 1,
-                                sampleType: "FLOAT32"
-                            },
-
-                            {
-                                id: "dataMask",
-                                bands: 1
-                            }
-                        ]
-                    };
-                }
-
-
-                function evaluatePixel(
-                    sample
-                ) {
-
-                    /*
-                        SCL classes excluded:
-
-                        0 = No data
-                        1 = Saturated / defective
-                        3 = Cloud shadow
-                        8 = Cloud medium probability
-                        9 = Cloud high probability
-                        10 = Thin cirrus
-                        11 = Snow / ice
-                    */
+                ? `
 
                     const invalidSclClasses = [
                         0,
@@ -156,20 +337,10 @@ class VegetationProvider extends BaseProvider {
                         11
                     ];
 
-
                     const isInvalid =
                         invalidSclClasses.includes(
                             sample.SCL
                         );
-
-
-                    /*
-                        Exclude:
-
-                        - No data
-                        - Invalid scene classes
-                        - Invalid band denominator
-                    */
 
                     if (
                         sample.dataMask === 0 ||
@@ -179,233 +350,394 @@ class VegetationProvider extends BaseProvider {
                             sample.B04
                         ) === 0
                     ) {
-
                         return {
-
-                            ndvi: [
-                                0
-                            ],
-
-                            dataMask: [
-                                0
-                            ]
+                            ndvi: [0],
+                            dataMask: [0]
                         };
                     }
 
+                `
 
-                    const ndvi =
-                        (
-                            sample.B08 -
-                            sample.B04
-                        ) /
+                : `
+
+                    if (
+                        sample.dataMask === 0 ||
                         (
                             sample.B08 +
                             sample.B04
-                        );
+                        ) === 0
+                    ) {
+                        return {
+                            ndvi: [0],
+                            dataMask: [0]
+                        };
+                    }
+
+                `;
 
 
-                    return {
+        const evalscript =
+            `
+//VERSION=3
 
-                        ndvi: [
-                            ndvi
-                        ],
+function setup() {
 
-                        /*
-                            Valid pixel.
-                        */
+    return {
 
-                        dataMask: [
-                            1
-                        ]
-                    };
-                }
+        input: [
+            {
+                bands: [
+                    "B04",
+                    "B08",
+                    "SCL",
+                    "dataMask"
+                ]
+            }
+        ],
+
+        output: [
+            {
+                id: "ndvi",
+                bands: 1,
+                sampleType: "FLOAT32"
+            },
+
+            {
+                id: "dataMask",
+                bands: 1
+            }
+        ]
+    };
+}
+
+
+function evaluatePixel(
+    sample
+) {
+
+    ${invalidSclCheck}
+
+    const ndvi =
+        (
+            sample.B08 -
+            sample.B04
+        ) /
+        (
+            sample.B08 +
+            sample.B04
+        );
+
+
+    return {
+
+        ndvi: [
+            ndvi
+        ],
+
+        dataMask: [
+            1
+        ]
+    };
+}
             `;
 
 
-            const requestBody = {
+        const requestBody =
+        {
 
-                input: {
+            input: {
 
-                    bounds: {
+                bounds: {
 
-                        bbox,
+                    bbox,
 
-                        properties: {
+                    properties: {
 
-                            crs:
-                                "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
-                        }
-                    },
-
-
-                    data: [
-
-                        {
-
-                            type:
-                                "sentinel-2-l2a",
-
-                            dataFilter: {
-
-                                /*
-                                    Choose a recent
-                                    least-cloudy scene.
-                                */
-
-                                mosaickingOrder:
-                                    "leastCC"
-                            }
-                        }
-                    ]
+                        crs:
+                            "http://www.opengis.net/def/crs/OGC/1.3/CRS84"
+                    }
                 },
 
 
-                aggregation: {
-
-                    timeRange: {
-
-                        from:
-                            dateRange.from,
-
-                        to:
-                            dateRange.to
-                    },
-
-
-                    /*
-                        Single aggregation
-                        for the full period.
-                    */
-
-                    aggregationInterval: {
-
-                        of:
-                            "P30D"
-                    },
-
-
-                    evalscript,
-
-
-                    /*
-                        Sentinel-2 resolution.
-                    */
-
-                    resx: 10,
-
-                    resy: 10
-                }
-            };
-
-
-            const response =
-                await axios.post(
-
-                    "https://sh.dataspace.copernicus.eu/statistics/v1",
-
-                    requestBody,
+                data: [
 
                     {
 
-                        headers: {
+                        type:
+                            "sentinel-2-l2a",
 
-                            Authorization:
-                                `Bearer ${accessToken}`,
+                        dataFilter: {
 
-                            "Content-Type":
-                                "application/json",
-
-                            Accept:
-                                "application/json"
+                            mosaickingOrder:
+                                "leastCC"
                         }
                     }
-                );
+                ]
+            },
 
+
+            aggregation: {
+
+                timeRange: {
+
+                    from:
+                        dateRange.from,
+
+                    to:
+                        dateRange.to
+                },
+
+
+                aggregationInterval: {
+
+                    of:
+                        "P14D"
+                },
+
+
+                evalscript,
+
+
+                /*
+                    Slightly larger
+                    resolution reduces
+                    processing time.
+                */
+
+                resx:
+                    20,
+
+                resy:
+                    20
+            }
+        };
+
+
+        const response =
+            await axios.post(
+
+                "https://sh.dataspace.copernicus.eu/statistics/v1",
+
+                requestBody,
+
+                {
+
+                    headers: {
+
+                        Authorization:
+                            `Bearer ${accessToken}`,
+
+                        "Content-Type":
+                            "application/json",
+
+                        Accept:
+                            "application/json"
+                    },
+
+                    timeout:
+                        20000
+                }
+            );
+
+
+        return (
+            response.data?.data ||
+            []
+        );
+    }
+
+
+    /*
+        Extract valid NDVI
+        from statistics response.
+    */
+
+    extractNdvi(
+        statisticsData
+    ) {
+
+        if (
+
+            !Array.isArray(
+                statisticsData
+            ) ||
+
+            statisticsData.length === 0
+
+        ) {
+
+            return null;
+        }
+
+
+        for (
+
+            let i =
+                statisticsData.length - 1;
+
+            i >= 0;
+
+            i--
+
+        ) {
+
+            const intervalData =
+                statisticsData[i];
+
+
+            const bandStats =
+
+                intervalData
+                    ?.outputs
+                    ?.ndvi
+                    ?.bands
+                    ?.B0
+                    ?.stats;
+
+
+            if (
+
+                bandStats &&
+
+                typeof bandStats.mean ===
+                "number" &&
+
+                bandStats.sampleCount >
+                bandStats.noDataCount
+
+            ) {
+
+                return (
+                    bandStats.mean
+                );
+            }
+        }
+
+
+        return null;
+    }
+
+
+    /*
+        Main provider method
+    */
+
+    async getData(
+        latitude,
+        longitude
+    ) {
+
+        try {
+
+            /*
+    Generate cache key
+    for this location
+*/
+
+const cacheKey =
+    this.getCacheKey(
+        latitude,
+        longitude
+    );
+
+
+/*
+    Check NDVI cache
+*/
+
+const cachedData =
+    VegetationProvider
+        .ndviCache
+        .get(
+            cacheKey
+        );
+
+
+if (
+    cachedData &&
+    (
+        Date.now() -
+        cachedData.timestamp
+    ) <
+    VegetationProvider
+        .NDVI_CACHE_DURATION
+) {
+
+    return {
+        ndvi:
+            cachedData.ndvi
+    };
+}
+
+            const accessToken =
+                await this.getAccessToken();
+
+
+            const dateRange =
+                this.getDateRange();
+
+
+            /*
+                STEP 1
+
+                Try strict cloud-free
+                NDVI first.
+            */
 
             const statisticsData =
-                response.data?.data;
+                await this.fetchNdviStatistics(
+
+                    accessToken,
+
+                    latitude,
+
+                    longitude,
+
+                    dateRange,
+
+                    false
+                );
 
 
-            if (
-                !Array.isArray(
+            const ndvi =
+                this.extractNdvi(
                     statisticsData
-                ) ||
-                statisticsData.length === 0
-            ) {
-
-                throw new Error(
-                    "No NDVI statistics received"
                 );
-            }
-
-
-            let ndvi = null;
 
 
             /*
-                Find the latest interval
-                containing valid pixels.
+                If satellite service still
+                returns no valid data,
+                fail clearly.
             */
 
-            for (
-                let i =
-                    statisticsData.length - 1;
-
-                i >= 0;
-
-                i--
-            ) {
-
-                const intervalData =
-                    statisticsData[i];
-
-
-                const bandStats =
-                    intervalData
-                        ?.outputs
-                        ?.ndvi
-                        ?.bands
-                        ?.B0
-                        ?.stats;
-
-
-                if (
-                    bandStats &&
-                    typeof bandStats.mean ===
-                        "number" &&
-                    bandStats.sampleCount >
-                        bandStats.noDataCount
-                ) {
-
-                    ndvi =
-                        bandStats.mean;
-
-                    break;
-                }
-            }
-
-
             if (
+
                 typeof ndvi !== "number" ||
-                Number.isNaN(ndvi)
+
+                Number.isNaN(
+                    ndvi
+                )
+
             ) {
 
                 throw new Error(
-                    "No valid cloud-free NDVI data available"
+                    "No valid NDVI data available"
                 );
             }
 
 
             /*
-                NDVI theoretical range:
-                -1 to +1
-
-                Safety validation.
+                NDVI theoretical range
+                validation.
             */
 
             if (
+
                 ndvi < -1 ||
+
                 ndvi > 1
+
             ) {
 
                 throw new Error(
@@ -414,24 +746,51 @@ class VegetationProvider extends BaseProvider {
             }
 
 
-            return {
+            const formattedNdvi =
+    Number(
+        ndvi.toFixed(
+            4
+        )
+    );
 
-                ndvi:
-                    Number(
-                        ndvi.toFixed(4)
-                    )
-            };
 
-        } catch (error) {
+/*
+    Save NDVI result
+    in cache
+*/
+
+VegetationProvider
+    .ndviCache
+    .set(
+        cacheKey,
+        {
+            ndvi:
+                formattedNdvi,
+
+            timestamp:
+                Date.now()
+        }
+    );
+
+
+return {
+
+    ndvi:
+        formattedNdvi
+};
+
+
+        } catch (
+        error
+        ) {
 
             throw new Error(
 
-                `Failed to fetch vegetation data: ${
-                    error.response?.data
-                        ? JSON.stringify(
-                            error.response.data
-                        )
-                        : error.message
+                `Failed to fetch vegetation data: ${error.response?.data
+                    ? JSON.stringify(
+                        error.response.data
+                    )
+                    : error.message
                 }`
             );
         }

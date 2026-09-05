@@ -34,6 +34,12 @@ const {
     "../services/mapDataService"
 );
 
+const {
+    getMapRiskZones
+} = require(
+    "../services/mapRiskZoneService"
+);
+
 
 const PredictionRecord =
     require("../models/PredictionRecord");
@@ -145,6 +151,10 @@ const predictRiskByLocation =
     asyncHandler(
         async (req, res) => {
 
+            const requestStartTime =
+                Date.now();
+
+
             const {
                 latitude,
                 longitude
@@ -198,25 +208,63 @@ const predictRiskByLocation =
 
 
             /*
-                STEP 1:
-
-                Get raw data from
-                all providers
+                =================================
+                STEP 1
+                GET CENTER LOCATION DATA
+                =================================
             */
 
-            const rawData =
-                await getLocationData(
-                    latitude,
-                    longitude
-                );
+           const locationDataStartTime =
+    Date.now();
+
+const mapZonesStartTime =
+    Date.now();
+
+
+const [
+    rawData,
+    mapRiskZones
+] =
+    await Promise.all([
+
+        getLocationData(
+            latitude,
+            longitude
+        ),
+
+        getMapRiskZones(
+            latitude,
+            longitude
+        )
+    ]);
+
+
+console.log(
+    `CENTER LOCATION DATA TIME: ${
+        Date.now() -
+        locationDataStartTime
+    } ms`
+);
+
+
+console.log(
+    `MAP RISK ZONES TIME: ${
+        Date.now() -
+        mapZonesStartTime
+    } ms`
+);
 
 
             /*
-                STEP 2:
-
-                Convert raw data into
-                ML-compatible features
+                =================================
+                STEP 2
+                PREPARE ML FEATURES
+                =================================
             */
+
+            const featureStartTime =
+                Date.now();
+
 
             const mlFeatures =
                 prepareMLFeatures(
@@ -224,12 +272,24 @@ const predictRiskByLocation =
                 );
 
 
-            /*
-                STEP 3:
+            console.log(
+                `FEATURE PREPARATION TIME: ${
+                    Date.now() -
+                    featureStartTime
+                } ms`
+            );
 
-                Send features
-                to ML service
+
+            /*
+                =================================
+                STEP 3
+                CENTER ML PREDICTION
+                =================================
             */
+
+            const mlStartTime =
+                Date.now();
+
 
             const result =
                 await getLandslidePrediction(
@@ -237,11 +297,19 @@ const predictRiskByLocation =
                 );
 
 
-            /*
-                STEP 4:
+            console.log(
+                `CENTER ML TIME: ${
+                    Date.now() -
+                    mlStartTime
+                } ms`
+            );
 
-                Interpret
-                ML result
+
+            /*
+                =================================
+                STEP 4
+                INTERPRET RISK
+                =================================
             */
 
             const riskInterpretation =
@@ -251,11 +319,15 @@ const predictRiskByLocation =
 
 
             /*
-                STEP 5:
-
-                Generate
-                risk insights
+                =================================
+                STEP 5
+                GENERATE INSIGHTS
+                =================================
             */
+
+            const insightsStartTime =
+                Date.now();
+
 
             const riskInsights =
                 generateRiskInsights(
@@ -265,13 +337,24 @@ const predictRiskByLocation =
                 );
 
 
-            /*
-                STEP 6:
+            console.log(
+                `RISK INSIGHTS TIME: ${
+                    Date.now() -
+                    insightsStartTime
+                } ms`
+            );
 
-                Prepare
-                map-compatible
-                risk data
+
+            /*
+                =================================
+                STEP 6
+                CENTER MAP DATA
+                =================================
             */
+
+            const mapDataStartTime =
+                Date.now();
+
 
             const mapData =
                 getMapRiskData(
@@ -286,12 +369,32 @@ const predictRiskByLocation =
                 );
 
 
-            /*
-                STEP 7:
+            console.log(
+                `CENTER MAP DATA TIME: ${
+                    Date.now() -
+                    mapDataStartTime
+                } ms`
+            );
 
-                Save complete prediction
-                in MongoDB
+
+            /*
+                =================================
+                STEP 7
+                SURROUNDING MAP RISK ZONES
+                =================================
             */
+
+           
+            /*
+                =================================
+                STEP 8
+                DATABASE SAVE
+                =================================
+            */
+
+            const databaseStartTime =
+                Date.now();
+
 
             const predictionRecord =
                 await PredictionRecord.create({
@@ -321,10 +424,40 @@ const predictRiskByLocation =
                 });
 
 
-            /*
-                STEP 8:
+            console.log(
+                `DATABASE SAVE TIME: ${
+                    Date.now() -
+                    databaseStartTime
+                } ms`
+            );
 
-                Send final response
+
+            /*
+                =================================
+                TOTAL REQUEST TIME
+                =================================
+            */
+
+            console.log(
+                "================================="
+            );
+
+
+            console.log(
+                `TOTAL API REQUEST TIME: ${
+                    Date.now() -
+                    requestStartTime
+                } ms`
+            );
+
+
+            console.log(
+                "================================="
+            );
+
+
+            /*
+                Send response
             */
 
             res.status(200).json({
@@ -351,6 +484,8 @@ const predictRiskByLocation =
                 riskInsights,
 
                 mapData,
+
+                mapRiskZones,
 
                 recordId:
                     predictionRecord._id

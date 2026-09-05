@@ -1,9 +1,23 @@
-const TerrainProvider = require("./terrainProvider");
+const TerrainProvider =
+    require(
+        "./terrainProvider"
+    );
 
-const getTerrainProvider = () => {
-    return new TerrainProvider();
-};
+
+const terrainProvider =
+    new TerrainProvider();
+
+
+const getTerrainProvider =
+    () => {
+
+        return terrainProvider;
+
+    };
+
 
 module.exports = {
+
     getTerrainProvider
+
 };
